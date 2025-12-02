@@ -1,49 +1,43 @@
 name: Auto Rollback
 
 on:
-  workflow_dispatch:  # Manual run (button in GitHub Actions)
-
-env:
-  IMAGE_REPO: docker.io/${{ secrets.REGISTRY_USER }}/myapp
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Choose a Docker tag for rollback"
+        required: true
+        type: choice
+        options:
+          - latest
 
 jobs:
-  rollback:
+  load-tags:
     runs-on: ubuntu-latest
-
+    outputs:
+      tags: ${{ steps.get-tags.outputs.tags }}
     steps:
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: docker.io
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      - name: Get image tags from Docker Hub
+      - name: Get tags from Docker Hub API
+        id: get-tags
         run: |
-          echo "Getting tags..."
-          TAGS=$(curl -s https://hub.docker.com/v2/repositories/${{ secrets.REGISTRY_USER }}/myapp/tags/?page_size=100 | jq -r '.results[].name')
-          echo "$TAGS" > tags.txt
-          echo "Available tags:"
-          cat tags.txt
+          echo "Fetching Docker tags..."
+          TAGS=$(curl -s "https://hub.docker.com/v2/repositories/vaqif/myapp/tags/?page_size=20" | jq -r '.results[].name')
+          
+          # Convert to GitHub's input choice format
+          CHOICES=$(echo "$TAGS" | sed 's/^/ - /')
+          
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHOICES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Determine previous tag
+  rollback:
+    needs: load-tags
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print selected tag
+        run: echo "Rolling back to: ${{ github.event.inputs.image_tag }}"
+
+      - name: Update Deployment (local example only)
         run: |
-          # Sort tags by creation order (latest first)
-          PREVIOUS=$(sed -n '2p' tags.txt)   # second line = previous version
-          echo "Previous tag is: $PREVIOUS"
-          echo "PREVIOUS_TAG=$PREVIOUS" >> $GITHUB_ENV
-
-      - name: Pull previous image
-        run: |
-          docker pull ${{ env.IMAGE_REPO }}:${{ env.PREVIOUS_TAG }}
-
-      - name: Retag previous version as latest
-        run: |
-          docker tag ${{ env.IMAGE_REPO }}:${{ env.PREVIOUS_TAG }} ${{ env.IMAGE_REPO }}:latest
-
-      - name: Push rolled-back latest image
-        run: |
-          docker push ${{ env.IMAGE_REPO }}:latest
-
-      - name: Done
-        run: echo "Rollback to previous version completed successfully!"
+          echo "Simulating rollback to tag: ${{ github.event.inputs.image_tag }}"
+          echo "In real kubernetes cluster you would run:"
+          echo "kubectl set image deployment/myapp myapp=vaqif/myapp:${{ github.event.inputs.image_tag }}"
