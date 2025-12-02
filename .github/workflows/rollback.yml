@@ -1,48 +1,49 @@
-name: Rollback Release
+name: Auto Rollback
 
 on:
-  workflow_dispatch:
-    inputs:
-      revision:
-        description: "Helm revision number to rollback to (empty = previous)"
-        required: false
-        default: ""
+  workflow_dispatch:  # Manual run (button in GitHub Actions)
+
+env:
+  IMAGE_REPO: docker.io/${{ secrets.REGISTRY_USER }}/myapp
 
 jobs:
   rollback:
     runs-on: ubuntu-latest
 
-    env:
-      RELEASE_NAME: myapp
-      NAMESPACE: default
-
     steps:
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          version: "v1.30.0"
+          registry: docker.io
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: "v3.15.2"
-
-      - name: Configure kubeconfig
+      - name: Get image tags from Docker Hub
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          echo "Getting tags..."
+          TAGS=$(curl -s https://hub.docker.com/v2/repositories/${{ secrets.REGISTRY_USER }}/myapp/tags/?page_size=100 | jq -r '.results[].name')
+          echo "$TAGS" > tags.txt
+          echo "Available tags:"
+          cat tags.txt
 
-      - name: Show Helm history
+      - name: Determine previous tag
         run: |
-          helm history $RELEASE_NAME -n $NAMESPACE
+          # Sort tags by creation order (latest first)
+          PREVIOUS=$(sed -n '2p' tags.txt)   # second line = previous version
+          echo "Previous tag is: $PREVIOUS"
+          echo "PREVIOUS_TAG=$PREVIOUS" >> $GITHUB_ENV
 
-      - name: Rollback release
+      - name: Pull previous image
         run: |
-          if [ -z "${{ github.event.inputs.revision }}" ]; then
-            echo "No revision provided. Rolling back to previous revision..."
-            # Helm-də 'helm rollback NAME 0' → əvvəlki versiyaya qayıdır
-            helm rollback $RELEASE_NAME 0 -n $NAMESPACE
-          else
-            echo "Rolling back to revision ${{ github.event.inputs.revision }}..."
-            helm rollback $RELEASE_NAME ${{ github.event.inputs.revision }} -n $NAMESPACE
-          fi
+          docker pull ${{ env.IMAGE_REPO }}:${{ env.PREVIOUS_TAG }}
+
+      - name: Retag previous version as latest
+        run: |
+          docker tag ${{ env.IMAGE_REPO }}:${{ env.PREVIOUS_TAG }} ${{ env.IMAGE_REPO }}:latest
+
+      - name: Push rolled-back latest image
+        run: |
+          docker push ${{ env.IMAGE_REPO }}:latest
+
+      - name: Done
+        run: echo "Rollback to previous version completed successfully!"
