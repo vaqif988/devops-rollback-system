@@ -37,3 +37,5 @@ This project demonstrates a production-like DevOps setup with:
    - Go to GitHub → Actions → `Rollback Release`
    - Click `Run workflow` → previous release will be restored.
 ////
+
+v1.5 test version
