@@ -4,40 +4,34 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Choose a Docker tag for rollback"
+        description: "Select tag for rollback"
         required: true
-        type: choice
-        options:
-          - latest
+        type: string
 
 jobs:
+
   load-tags:
     runs-on: ubuntu-latest
     outputs:
-      tags: ${{ steps.get-tags.outputs.tags }}
+      tags: ${{ steps.list-tags.outputs.tags }}
     steps:
-      - name: Get tags from Docker Hub API
-        id: get-tags
+      - name: List Docker Hub tags
+        id: list-tags
         run: |
-          echo "Fetching Docker tags..."
           TAGS=$(curl -s "https://hub.docker.com/v2/repositories/vaqif/myapp/tags/?page_size=20" | jq -r '.results[].name')
-          
-          # Convert to GitHub's input choice format
-          CHOICES=$(echo "$TAGS" | sed 's/^/ - /')
-          
+          echo "Available tags:"
+          echo "$TAGS"
+
           echo "tags<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHOICES" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
   rollback:
     needs: load-tags
     runs-on: ubuntu-latest
     steps:
-      - name: Print selected tag
-        run: echo "Rolling back to: ${{ github.event.inputs.image_tag }}"
-
-      - name: Update Deployment (local example only)
+      - name: Rollback info
         run: |
-          echo "Simulating rollback to tag: ${{ github.event.inputs.image_tag }}"
-          echo "In real kubernetes cluster you would run:"
-          echo "kubectl set image deployment/myapp myapp=vaqif/myapp:${{ github.event.inputs.image_tag }}"
+          echo "Available tags were:"
+          echo "${{ needs.load-tags.outputs.tags }}"
+          echo "Selected tag for rollback: ${{ github.event.inputs.image_tag }}"
